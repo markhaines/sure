@@ -61,7 +61,7 @@ class GocardlessAccount < ApplicationRecord
              data[:owner_name].presence ||
              details[:iban].presence ||
              data[:iban].presence)&.to_s&.squish,
-      current_balance: extract_balance(balances),
+      current_balance: normalised_balance(extract_balance(balances), details[:cashAccountType] || details[:product]),
       # PSD2 always reports a currency per account; only fall back if the bank omits it.
       currency: details[:currency].presence || balances.first&.dig(:balanceAmount, :currency) || "GBP",
       account_status: data[:status] || details[:status],
@@ -73,6 +73,30 @@ class GocardlessAccount < ApplicationRecord
     )
   end
 
+  # GoCardless reports PSD2 `cashAccountType`, an ISO 20022 code, not Sure's vocabulary.
+  # Lives here rather than in the controller because the balance sign depends on it too.
+  ISO20022_ACCOUNTABLE_TYPES = {
+    "card" => "CreditCard",   # card account
+    "loan" => "Loan",         # loan account
+    "odft" => "CreditCard",   # overdraft: a liability, closest fit is a credit line
+    "cacc" => "Depository",   # current
+    "svgs" => "Depository",   # savings
+    "slry" => "Depository",   # salary
+    "tran" => "Depository",   # transacting
+    "cash" => "Depository",   # cash payment
+    "sacc" => "Depository"    # settlement
+  }.freeze
+
+  LIABILITY_ACCOUNTABLE_TYPES = %w[CreditCard Loan OtherLiability].freeze
+
+  def self.accountable_type_for(cash_account_type)
+    ISO20022_ACCOUNTABLE_TYPES[cash_account_type.to_s.downcase]
+  end
+
+  def self.liability?(cash_account_type)
+    LIABILITY_ACCOUNTABLE_TYPES.include?(accountable_type_for(cash_account_type))
+  end
+
   # Picks the balance that best represents "what the account is worth now".
   #
   # Banks return several balanceType values and not all return the same set, so this
@@ -80,6 +104,21 @@ class GocardlessAccount < ApplicationRecord
   # closing figure, then anything at all. Without this ordering the balance shown depends
   # on arbitrary array order and can silently disagree with the bank's own app.
   BALANCE_TYPE_PRIORITY = %w[interimAvailable closingBooked interimBooked expected openingBooked forwardAvailable].freeze
+
+  # Sure stores a liability as a POSITIVE amount owed and subtracts it from net worth.
+  # GoCardless follows the bank's convention, where a card you owe money on reports a
+  # NEGATIVE balance. Storing that verbatim makes debt ADD to net worth: with two cards
+  # this read +£18,759 instead of -£12,088, a £30k swing that still looks like a
+  # plausible number, which is what makes it dangerous.
+  #
+  # Negating rather than taking the absolute value is deliberate: a card in credit
+  # reports positive, and should become a negative liability rather than more debt.
+  def normalised_balance(balance, cash_account_type)
+    return balance if balance.nil?
+    return balance unless self.class.liability?(cash_account_type)
+
+    -balance
+  end
 
   def extract_balance(balances)
     return nil if balances.blank?
