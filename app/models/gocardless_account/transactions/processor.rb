@@ -86,21 +86,24 @@ class GocardlessAccount::Transactions::Processor
 
       data = transaction_data.with_indifferent_access
 
-      # TODO: Customize based on your provider's transaction format
-      # Extract transaction fields from the provider's API response
-      external_id = (data[:id] || data[:transaction_id]).to_s
+      external_id = external_id_for(data)
       return nil if external_id.blank?
 
       # Parse transaction attributes
       amount = parse_transaction_amount(data)
       return nil if amount.nil?
 
-      # TODO: Customize date field names based on your provider
-      date = parse_date(data[:date] || data[:transaction_date] || data[:posted_at], family: account&.family)
+      # bookingDate is when the bank settled it and is what the statement shows.
+      # valueDate is the interest date and can differ by days. Prefer booking, fall back
+      # to value, then the datetime variant that some banks send instead.
+      date = parse_date(
+        data[:bookingDate] || data[:valueDate] || data[:bookingDateTime] || data[:valueDateTime],
+        family: account&.family
+      )
       return nil if date.nil?
 
-      name = data[:name] || data[:description] || data[:merchant_name] || "Transaction"
-      currency = extract_currency(data, fallback: account.currency)
+      name = transaction_name(data)
+      currency = data.dig(:transactionAmount, :currency).presence || account.currency
 
       # Build provider-specific metadata for transaction.extra
       extra = build_extra_metadata(data)
@@ -119,28 +122,60 @@ class GocardlessAccount::Transactions::Processor
       )
     end
 
+    # GoCardless follows the bank's own sign convention: a debit (money leaving the
+    # account) is NEGATIVE and a credit is POSITIVE. Sure is the exact inverse, so every
+    # amount is negated here. Getting this backwards silently turns every expense into
+    # income and still "works", so it is the single most important line in this file.
     def parse_transaction_amount(data)
-      amount = parse_decimal(data[:amount])
+      amount = parse_decimal(data.dig(:transactionAmount, :amount))
       return nil if amount.nil?
 
-      # TODO: Adjust sign convention based on your provider
-      # Most banking APIs use positive amounts for debits (money out)
-      # and negative amounts for credits (money in)
-      # Sure convention: positive = money out, negative = money in
-      #
-      # If your provider uses the opposite convention, negate the amount:
-      # amount = -amount
-      amount
+      -amount
+    end
+
+    # transactionId is the bank's stable identifier and is what dedup keys on. Pending
+    # entries frequently arrive WITHOUT one, so a deterministic surrogate is derived from
+    # the fields that do exist.
+    #
+    # Caveat worth knowing: when such a pending entry later posts, it arrives with a real
+    # transactionId and no longer matches the surrogate, so it can appear twice until the
+    # pending copy ages out. Banks that do send transactionId on pending entries are
+    # unaffected. Preferred over dropping pending entries entirely, which would leave
+    # recent spending invisible.
+    def external_id_for(data)
+      id = data[:transactionId].presence || data[:internalTransactionId].presence
+      return id.to_s if id.present?
+
+      fingerprint = [
+        data[:bookingDate] || data[:valueDate],
+        data.dig(:transactionAmount, :amount),
+        transaction_name(data)
+      ].join("|")
+
+      "pending:#{Digest::SHA256.hexdigest(fingerprint)[0..31]}"
+    end
+
+    # Banks scatter the human-readable description across several optional fields, and
+    # which one is populated varies by institution, so fall through them in order of
+    # usefulness rather than trusting any single one.
+    def transaction_name(data)
+      unstructured = data[:remittanceInformationUnstructured].presence ||
+                     Array(data[:remittanceInformationUnstructuredArray]).join(" ").presence
+
+      counterparty = data[:creditorName].presence || data[:debtorName].presence
+
+      (unstructured || counterparty || data[:additionalInformation].presence || "Transaction").to_s.squish
     end
 
     def build_extra_metadata(data)
-      # TODO: Customize which fields to store based on your provider
       {
         "gocardless" => {
-          "id" => data[:id] || data[:transaction_id],
-          "pending" => data[:pending] || data[:is_pending],
-          "merchant" => data[:merchant] || data[:merchant_name],
-          "category" => data[:category]
+          "id" => data[:transactionId],
+          "internal_id" => data[:internalTransactionId],
+          "pending" => data[:pending],
+          "merchant" => data[:creditorName] || data[:debtorName],
+          "category" => data[:merchantCategoryCode],
+          "bank_transaction_code" => data[:proprietaryBankTransactionCode]
         }.compact
       }
     end

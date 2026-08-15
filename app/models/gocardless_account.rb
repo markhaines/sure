@@ -44,18 +44,51 @@ class GocardlessAccount < ApplicationRecord
     # Convert SDK object to hash if needed
     data = sdk_object_to_hash(account_data).with_indifferent_access
 
-    # TODO: Customize this mapping based on your provider's API response
+    details = (data[:details] || {}).with_indifferent_access
+    balances = Array(data[:balances])
+
     update!(
-      gocardless_account_id: (data[:id] || data[:account_id])&.to_s,
-      name: data[:name] || data[:account_name],
-      current_balance: parse_decimal(data[:balance] || data[:current_balance]),
-      currency: extract_currency(data, fallback: "USD"),
-      account_status: data[:status] || data[:account_status],
-      account_type: data[:type] || data[:account_type],
-      provider: data[:provider] || data[:brokerage_name],
+      gocardless_account_id: data[:id].to_s,
+      # Banks rarely set a friendly `name`. Fall back through the fields most likely to
+      # carry something a human recognises before resorting to the IBAN, so accounts do
+      # not all show up as blank in the picker.
+      name: details[:name].presence ||
+            details[:displayName].presence ||
+            details[:product].presence ||
+            details[:ownerName].presence ||
+            data[:owner_name].presence ||
+            details[:iban].presence ||
+            data[:iban].presence,
+      current_balance: extract_balance(balances),
+      # PSD2 always reports a currency per account; only fall back if the bank omits it.
+      currency: details[:currency].presence || balances.first&.dig(:balanceAmount, :currency) || "GBP",
+      account_status: data[:status] || details[:status],
+      # cashAccountType follows ISO 20022: CACC current, SVGS savings, CARD card.
+      account_type: details[:cashAccountType] || details[:product],
+      provider: "gocardless",
       institution_metadata: extract_institution_metadata(data),
       raw_payload: account_data
     )
+  end
+
+  # Picks the balance that best represents "what the account is worth now".
+  #
+  # Banks return several balanceType values and not all return the same set, so this
+  # prefers the interim available figure (what most banks show in-app), then the booked
+  # closing figure, then anything at all. Without this ordering the balance shown depends
+  # on arbitrary array order and can silently disagree with the bank's own app.
+  BALANCE_TYPE_PRIORITY = %w[interimAvailable closingBooked interimBooked expected openingBooked forwardAvailable].freeze
+
+  def extract_balance(balances)
+    return nil if balances.blank?
+
+    normalised = balances.map { |b| b.respond_to?(:with_indifferent_access) ? b.with_indifferent_access : b }
+
+    chosen = BALANCE_TYPE_PRIORITY.lazy.filter_map { |type|
+      normalised.find { |b| b[:balanceType].to_s == type }
+    }.first || normalised.first
+
+    parse_decimal(chosen.dig(:balanceAmount, :amount))
   end
 
   def upsert_gocardless_transactions_snapshot!(transactions_snapshot)

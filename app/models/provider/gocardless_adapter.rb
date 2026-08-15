@@ -5,11 +5,10 @@ class Provider::GocardlessAdapter < Provider::Base
   # Register this adapter with the factory
   Provider::Factory.register("GocardlessAccount", self)
 
-  # Define which account types this provider supports
+  # PSD2 account information covers payment accounts and card accounts. Loans are not
+  # exposed by the GoCardless account endpoints, so they are deliberately not claimed.
   def self.supported_account_types
-    # Banking providers typically support these account types
-    # TODO: Adjust based on your provider's capabilities
-    %w[Depository CreditCard Loan]
+    %w[Depository CreditCard]
   end
 
   # Returns connection configurations for this provider
@@ -18,11 +17,13 @@ class Provider::GocardlessAdapter < Provider::Base
 
     [ {
       key: "gocardless",
-      name: "Gocardless",
-      description: "Connect to your bank via Gocardless",
+      name: "GoCardless",
+      description: "Connect to your bank via GoCardless open banking (UK and EU)",
       can_connect: true,
+      # Institution must be chosen before a requisition can be created, so the entry
+      # point is the item's own new/select-bank flow rather than account selection.
       new_account_path: ->(accountable_type, return_to) {
-        Rails.application.routes.url_helpers.select_accounts_gocardless_items_path(
+        Rails.application.routes.url_helpers.new_gocardless_item_path(
           accountable_type: accountable_type,
           return_to: return_to
         )
@@ -45,15 +46,16 @@ class Provider::GocardlessAdapter < Provider::Base
   def self.build_provider(family: nil)
     return nil unless family.present?
 
-    # Get family-specific credentials
+    # Credentials are account-level at GoCardless, not per-connection, so any item
+    # carrying a configured pair can supply them for the whole family. Matching
+    # EnableBankingAdapter, the first fully-configured item wins.
     gocardless_item = family.gocardless_items.where.not(secret_id: nil).first
     return nil unless gocardless_item&.credentials_configured?
 
-    # TODO: Implement provider initialization
-    # Provider::Gocardless.new(
-    #   gocardless_item.secret_id
-    # )
-    raise NotImplementedError, "Implement Provider::Gocardless.new in #{__FILE__}"
+    Provider::Gocardless.new(
+      secret_id: gocardless_item.secret_id,
+      secret_key: gocardless_item.secret_key
+    )
   end
 
   def sync_path

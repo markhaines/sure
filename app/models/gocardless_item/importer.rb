@@ -60,45 +60,83 @@ class GocardlessItem::Importer
     def import_accounts(credentials)
       Rails.logger.info "GocardlessItem::Importer - Fetching accounts"
 
-      # TODO: Implement API call to fetch accounts
-      # accounts_data = gocardless_provider.list_accounts(...)
-      accounts_data = []
-
+      # A requisition holds the user's consent and only lists account ids once the user
+      # has finished authorising at the bank (status LN). Anything else means the
+      # connection is not usable yet, and is not an error worth failing the sync over.
+      requisition = gocardless_provider.get_requisition(
+        requisition_id: gocardless_item.requisition_id
+      )
       stats["api_requests"] = stats.fetch("api_requests", 0) + 1
-      stats["total_accounts"] = accounts_data.size
 
-      # Track upstream account IDs to detect removed accounts
+      gocardless_item.update(requisition_status: requisition[:status])
+
+      account_ids = Array(requisition[:accounts]).map(&:to_s).reject(&:blank?)
+
+      if account_ids.empty?
+        Rails.logger.info "GocardlessItem::Importer - Requisition #{requisition[:status]} with no accounts yet"
+        stats["total_accounts"] = 0
+        persist_stats!
+        return
+      end
+
+      stats["total_accounts"] = account_ids.size
       upstream_account_ids = []
 
-      accounts_data.each do |account_data|
+      account_ids.each do |account_id|
         begin
-          import_account(account_data, credentials)
-          # TODO: Extract account ID from your provider's response format
-          # upstream_account_ids << account_data[:id].to_s if account_data[:id]
+          import_account(account_id, credentials)
+          upstream_account_ids << account_id
+        rescue Provider::Gocardless::GocardlessError => e
+          # A rate-limited account is a normal daily condition, not a broken one. Keep it
+          # in upstream_account_ids so the pruner does not delete an account that is
+          # merely quota-blocked today.
+          if e.rate_limited?
+            Rails.logger.info "GocardlessItem::Importer - Account #{account_id} rate limited, skipping until quota resets"
+            stats["accounts_rate_limited"] = stats.fetch("accounts_rate_limited", 0) + 1
+            upstream_account_ids << account_id
+          else
+            Rails.logger.error "GocardlessItem::Importer - Failed to import account #{account_id}: #{e.message}"
+            stats["accounts_skipped"] = stats.fetch("accounts_skipped", 0) + 1
+            register_error(e, account_data: { account_id: account_id })
+          end
         rescue => e
-          Rails.logger.error "GocardlessItem::Importer - Failed to import account: #{e.message}"
+          Rails.logger.error "GocardlessItem::Importer - Failed to import account #{account_id}: #{e.message}"
           stats["accounts_skipped"] = stats.fetch("accounts_skipped", 0) + 1
-          register_error(e, account_data: account_data)
+          register_error(e, account_data: { account_id: account_id })
         end
       end
 
       persist_stats!
 
-      # Clean up accounts that no longer exist upstream
       prune_removed_accounts(upstream_account_ids)
     end
 
-    def import_account(account_data, credentials)
-      # TODO: Customize based on your provider's account ID field
-      # gocardless_account_id = account_data[:id].to_s
-      # return if gocardless_account_id.blank?
+    # GoCardless splits one account across three endpoints, and each call is charged
+    # against a small per-account daily quota, so they are fetched once here and stitched
+    # into a single payload rather than re-fetched per consumer.
+    def import_account(account_id, credentials)
+      return if account_id.blank?
 
-      # gocardless_account = gocardless_item.gocardless_accounts.find_or_initialize_by(
-      #   gocardless_account_id: gocardless_account_id
-      # )
+      metadata = gocardless_provider.get_account(account_id: account_id)
+      details = gocardless_provider.get_account_details(account_id: account_id)
+      balances = gocardless_provider.get_account_balances(account_id: account_id)
+      stats["api_requests"] = stats.fetch("api_requests", 0) + 3
 
-      # Update from API data
-      # gocardless_account.upsert_from_gocardless!(account_data)
+      account_data = {
+        id: account_id,
+        institution_id: metadata[:institution_id],
+        iban: metadata[:iban],
+        status: metadata[:status],
+        owner_name: metadata[:owner_name],
+        details: details[:account] || {},
+        balances: Array(balances[:balances])
+      }
+
+      gocardless_account = gocardless_item.gocardless_accounts.find_or_initialize_by(
+        gocardless_account_id: account_id
+      )
+
+      gocardless_account.upsert_from_gocardless!(account_data)
 
       stats["accounts_imported"] = stats.fetch("accounts_imported", 0) + 1
     end
@@ -116,13 +154,18 @@ class GocardlessItem::Importer
         start_date = calculate_transaction_start_date(gocardless_account)
         end_date = Date.current
 
-        # TODO: Implement API call to fetch transactions
-        # transactions_data = gocardless_provider.get_transactions(
-        #   account_id: gocardless_account.gocardless_account_id,
-        #   start_date: start_date,
-        #   end_date: end_date
-        # )
-        transactions_data = []
+        response = gocardless_provider.get_account_transactions(
+          account_id: gocardless_account.gocardless_account_id,
+          date_from: start_date,
+          date_to: end_date
+        )
+
+        # GoCardless returns booked and pending separately. Both are kept, tagged so the
+        # processor can mark pending entries, because a pending transaction becomes a
+        # booked one later and must reconcile rather than duplicate.
+        booked = Array(response.dig(:transactions, :booked)).map { |t| t.merge(pending: false) }
+        pending = Array(response.dig(:transactions, :pending)).map { |t| t.merge(pending: true) }
+        transactions_data = booked + pending
 
         stats["api_requests"] = stats.fetch("api_requests", 0) + 1
 
