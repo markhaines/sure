@@ -9,12 +9,18 @@ Rails.application.routes.draw do
       post :link_accounts
       get :select_existing_account
       post :link_existing_account
+      # The bank redirects the browser back here after the user consents. It is a
+      # collection route because GoCardless returns no item id of its own: the item is
+      # recovered from the `ref` we set on the requisition.
+      get :callback
     end
 
     member do
       post :sync
       get :setup_accounts
       post :complete_account_setup
+      get :select_bank
+      post :connect
     end
   end
   resources :questrade_items, only: [ :index, :new, :create, :show, :edit, :update, :destroy ] do

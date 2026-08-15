@@ -3,7 +3,98 @@
 class GocardlessItemsController < ApplicationController
   ALLOWED_ACCOUNTABLE_TYPES = %w[Depository CreditCard Investment Loan OtherAsset OtherLiability Crypto Property Vehicle].freeze
 
-  before_action :set_gocardless_item, only: [ :show, :edit, :update, :destroy, :sync, :setup_accounts, :complete_account_setup ]
+  before_action :set_gocardless_item, only: [ :show, :edit, :update, :destroy, :sync, :setup_accounts, :complete_account_setup, :select_bank, :connect ]
+
+  # GoCardless sends the user's browser back here after they consent at their bank. It
+  # carries no session, so the item is recovered from the `ref` we set when creating the
+  # requisition. `ref` is the item's own uuid, and the lookup is scoped to the current
+  # family, so a guessed or replayed value cannot reach another family's item.
+  def callback
+    item = Current.family.gocardless_items.find_by(id: params[:ref])
+
+    if item.nil?
+      redirect_to accounts_path, alert: t(".unknown_connection", default: "That bank connection could not be found."), status: :see_other
+      return
+    end
+
+    provider = Provider::GocardlessAdapter.build_provider(family: Current.family)
+    requisition = provider.get_requisition(requisition_id: item.requisition_id)
+    item.update(requisition_status: requisition[:status])
+
+    # LN (linked) is the only status where accounts are readable. Anything else means the
+    # user abandoned or the bank rejected the consent, and retrying the same requisition
+    # will not help: a fresh one is needed.
+    if requisition[:status].to_s == "LN"
+      item.update(pending_account_setup: true)
+      redirect_to setup_accounts_gocardless_item_path(item), status: :see_other
+    else
+      redirect_to accounts_path,
+                  alert: t(".not_linked", default: "The bank did not complete the connection (status #{requisition[:status]}). Please try connecting again."),
+                  status: :see_other
+    end
+  rescue Provider::Gocardless::GocardlessError => e
+    Rails.logger.error "GocardlessItemsController#callback - #{e.message}"
+    redirect_to accounts_path, alert: e.message, status: :see_other
+  end
+
+  # Bank picker. Institutions are fetched per country because GoCardless scopes its
+  # institution list that way.
+  def select_bank
+    @country = params[:country].presence || "GB"
+    provider = Provider::GocardlessAdapter.build_provider(family: Current.family)
+
+    if provider.nil?
+      redirect_to settings_providers_path, alert: t(".not_configured", default: "Add your GoCardless credentials first."), status: :see_other
+      return
+    end
+
+    @institutions = provider.get_institutions(country: @country).sort_by { |i| i[:name].to_s }
+  rescue Provider::Gocardless::GocardlessError => e
+    @institutions = []
+    @error_message = e.message
+  end
+
+  # Creates the consent and hands the user to their bank.
+  def connect
+    institution_id = params[:institution_id]
+    provider = Provider::GocardlessAdapter.build_provider(family: Current.family)
+
+    institution = provider.get_institution(institution_id: institution_id)
+
+    # Ask for as much history and as long an access window as this institution allows,
+    # rather than the API defaults. UK banks commonly offer 730 days of history but
+    # default to far less, and re-consenting is user-visible friction worth avoiding.
+    agreement = provider.create_agreement(
+      institution_id: institution_id,
+      max_historical_days: institution[:transaction_total_days].presence&.to_i ||
+                           Provider::Gocardless::DEFAULT_MAX_HISTORICAL_DAYS,
+      access_valid_for_days: institution[:max_access_valid_for_days].presence&.to_i ||
+                             Provider::Gocardless::DEFAULT_ACCESS_VALID_FOR_DAYS
+    )
+
+    requisition = provider.create_requisition(
+      institution_id: institution_id,
+      redirect: callback_gocardless_items_url,
+      reference: @gocardless_item.id,
+      agreement: agreement[:id],
+      user_language: "EN"
+    )
+
+    @gocardless_item.update!(
+      institution_id: institution_id,
+      institution_name: institution[:name],
+      institution_url: institution[:logo],
+      agreement_id: agreement[:id],
+      requisition_id: requisition[:id],
+      requisition_status: requisition[:status]
+    )
+
+    # allow_other_host: this deliberately leaves the app for the bank's own consent page.
+    redirect_to requisition[:link], allow_other_host: true
+  rescue Provider::Gocardless::GocardlessError => e
+    Rails.logger.error "GocardlessItemsController#connect - #{e.message}"
+    redirect_to select_bank_gocardless_item_path(@gocardless_item), alert: e.message, status: :see_other
+  end
 
   def index
     @gocardless_items = Current.family.gocardless_items.ordered
