@@ -52,13 +52,15 @@ class GocardlessAccount < ApplicationRecord
       # Banks rarely set a friendly `name`. Fall back through the fields most likely to
       # carry something a human recognises before resorting to the IBAN, so accounts do
       # not all show up as blank in the picker.
-      name: details[:name].presence ||
-            details[:displayName].presence ||
-            details[:product].presence ||
-            details[:ownerName].presence ||
-            data[:owner_name].presence ||
-            details[:iban].presence ||
-            data[:iban].presence,
+      # Banks pad these to fixed-width fields, so "Black Debit Account          " arrives
+      # verbatim. squish rather than strip: some send internal runs of spaces too.
+      name: (details[:name].presence ||
+             details[:displayName].presence ||
+             details[:product].presence ||
+             details[:ownerName].presence ||
+             data[:owner_name].presence ||
+             details[:iban].presence ||
+             data[:iban].presence)&.to_s&.squish,
       current_balance: extract_balance(balances),
       # PSD2 always reports a currency per account; only fall back if the bank omits it.
       currency: details[:currency].presence || balances.first&.dig(:balanceAmount, :currency) || "GBP",

@@ -26,7 +26,15 @@ class GocardlessItemsController < ApplicationController
     # will not help: a fresh one is needed.
     if requisition[:status].to_s == "LN"
       item.update(pending_account_setup: true)
-      redirect_to setup_accounts_gocardless_item_path(item), status: :see_other
+
+      # Consent alone creates no local records: the accounts still have to be fetched
+      # from the requisition. Without this the setup screen renders an empty list,
+      # because there is nothing to show until the importer has run.
+      item.sync_later
+
+      redirect_to accounts_path,
+                  notice: t(".success", default: "Connected to #{item.institution_name || 'your bank'}. Your accounts are being synced."),
+                  status: :see_other
     else
       redirect_to accounts_path,
                   alert: t(".not_linked", default: "The bank did not complete the connection (status #{requisition[:status]}). Please try connecting again."),
