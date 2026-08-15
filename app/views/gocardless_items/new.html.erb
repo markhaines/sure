@@ -18,7 +18,7 @@
     </div>
   <% end %>
 
-  <%= form_with url: select_bank_gocardless_item_path(@gocardless_item), method: :get, data: { turbo_frame: "_top" } do |f| %>
+  <%= form_with url: new_gocardless_item_path, method: :get, data: { turbo_frame: "_top" } do |f| %>
     <label class="block text-sm text-secondary mb-1" for="country"><%= t(".country", default: "Country") %></label>
     <%= f.select :country,
                  options_for_select(
@@ -42,7 +42,7 @@
     <ul class="divide-y divide-alpha-black-100 rounded-lg border border-primary bg-container">
       <% @institutions.each do |institution| %>
         <li>
-          <%= button_to connect_gocardless_item_path(@gocardless_item),
+          <%= button_to connect_gocardless_items_path,
                         params: { institution_id: institution[:id] },
                         class: "w-full flex items-center gap-3 p-3 hover:bg-surface-hover text-left" do %>
             <% if institution[:logo].present? %>

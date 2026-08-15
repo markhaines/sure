@@ -13,14 +13,15 @@ Rails.application.routes.draw do
       # collection route because GoCardless returns no item id of its own: the item is
       # recovered from the `ref` we set on the requisition.
       get :callback
+      # Collection, not member: the item is created as part of connecting, once a bank
+      # has actually been chosen.
+      post :connect
     end
 
     member do
       post :sync
       get :setup_accounts
       post :complete_account_setup
-      get :select_bank
-      post :connect
     end
   end
   resources :questrade_items, only: [ :index, :new, :create, :show, :edit, :update, :destroy ] do

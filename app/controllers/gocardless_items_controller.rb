@@ -3,7 +3,7 @@
 class GocardlessItemsController < ApplicationController
   ALLOWED_ACCOUNTABLE_TYPES = %w[Depository CreditCard Investment Loan OtherAsset OtherLiability Crypto Property Vehicle].freeze
 
-  before_action :set_gocardless_item, only: [ :show, :edit, :update, :destroy, :sync, :setup_accounts, :complete_account_setup, :select_bank, :connect ]
+  before_action :set_gocardless_item, only: [ :show, :edit, :update, :destroy, :sync, :setup_accounts, :complete_account_setup ]
 
   # GoCardless sends the user's browser back here after they consent at their bank. It
   # carries no session, so the item is recovered from the `ref` we set when creating the
@@ -37,10 +37,14 @@ class GocardlessItemsController < ApplicationController
     redirect_to accounts_path, alert: e.message, status: :see_other
   end
 
-  # Bank picker. Institutions are fetched per country because GoCardless scopes its
-  # institution list that way.
-  def select_bank
-    @country = params[:country].presence || "GB"
+  # Creates the consent and hands the user to their bank.
+  #
+  # The item is created HERE rather than before bank selection. GoCardless credentials
+  # are account-level, so an item is really "one bank connection", and there is nothing
+  # meaningful to persist until a bank has been chosen. Creating it earlier would also
+  # mean a GET request creating records, which a prefetch or crawler could trigger.
+  def connect
+    institution_id = params[:institution_id]
     provider = Provider::GocardlessAdapter.build_provider(family: Current.family)
 
     if provider.nil?
@@ -48,16 +52,12 @@ class GocardlessItemsController < ApplicationController
       return
     end
 
-    @institutions = provider.get_institutions(country: @country).sort_by { |i| i[:name].to_s }
-  rescue Provider::Gocardless::GocardlessError => e
-    @institutions = []
-    @error_message = e.message
-  end
+    @gocardless_item = connection_item_for_new_bank
 
-  # Creates the consent and hands the user to their bank.
-  def connect
-    institution_id = params[:institution_id]
-    provider = Provider::GocardlessAdapter.build_provider(family: Current.family)
+    if @gocardless_item.nil?
+      redirect_to settings_providers_path, alert: t(".not_configured", default: "Add your GoCardless credentials first."), status: :see_other
+      return
+    end
 
     institution = provider.get_institution(institution_id: institution_id)
 
@@ -103,8 +103,23 @@ class GocardlessItemsController < ApplicationController
   def show
   end
 
+  # Bank picker. Institutions are scoped to a country by the API, so the country select
+  # reloads the list rather than filtering client-side.
   def new
-    @gocardless_item = Current.family.gocardless_items.build
+    @country = params[:country].presence || "GB"
+    provider = Provider::GocardlessAdapter.build_provider(family: Current.family)
+
+    if provider.nil?
+      redirect_to settings_providers_path,
+                  alert: t(".not_configured", default: "Add your GoCardless credentials first."),
+                  status: :see_other
+      return
+    end
+
+    @institutions = provider.get_institutions(country: @country).sort_by { |i| i[:name].to_s }
+  rescue Provider::Gocardless::GocardlessError => e
+    @institutions = []
+    @error_message = e.message
   end
 
   def edit
@@ -356,6 +371,28 @@ class GocardlessItemsController < ApplicationController
   end
 
   private
+
+    # Returns the item that should carry this new bank connection.
+    #
+    # Configuring credentials in settings creates an item that has no requisition yet, so
+    # the first connection reuses it instead of stranding it. Later connections get a
+    # fresh item carrying a copy of the same account-level credentials.
+    def connection_item_for_new_bank
+      credentials_source = Current.family.gocardless_items.where.not(secret_id: nil).first
+      return nil if credentials_source.nil?
+
+      unconfigured = Current.family.gocardless_items
+                            .where.not(secret_id: nil)
+                            .where(requisition_id: nil)
+                            .first
+      return unconfigured if unconfigured
+
+      Current.family.gocardless_items.create!(
+        name: "GoCardless Connection",
+        secret_id: credentials_source.secret_id,
+        secret_key: credentials_source.secret_key
+      )
+    end
 
     def set_gocardless_item
       @gocardless_item = Current.family.gocardless_items.find(params[:id])
