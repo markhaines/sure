@@ -33,6 +33,11 @@ class GocardlessItem < ApplicationRecord
   scope :active, -> { where(scheduled_for_deletion: false) }
   scope :ordered, -> { order(created_at: :desc) }
   scope :needs_update, -> { where(status: :requires_update) }
+  # Required by Family::Syncer, which discovers provider items reflectively: any
+  # `*_items` association whose model includes Syncable is expected to answer
+  # `syncable`. Without it the nightly family sync raises NoMethodError for EVERY
+  # provider, not just this one.
+  scope :syncable, -> { active }
 
   def syncer
     GocardlessItem::Syncer.new(self)
