@@ -11,11 +11,6 @@
     <ul>
       <li><strong><%= t("gocardless_items.panel.fields.secret_id.label") %>:</strong> <%= t("gocardless_items.panel.fields.secret_id.description") %> <%= t("gocardless_items.panel.required") %></li>
       <li><strong><%= t("gocardless_items.panel.fields.secret_key.label") %>:</strong> <%= t("gocardless_items.panel.fields.secret_key.description") %> <%= t("gocardless_items.panel.required") %></li>
-      <li><strong><%= t("gocardless_items.panel.fields.institution_id.label") %>:</strong> <%= t("gocardless_items.panel.fields.institution_id.description") %></li>
-      <li><strong><%= t("gocardless_items.panel.fields.institution_name.label") %>:</strong> <%= t("gocardless_items.panel.fields.institution_name.description") %></li>
-      <li><strong><%= t("gocardless_items.panel.fields.requisition_id.label") %>:</strong> <%= t("gocardless_items.panel.fields.requisition_id.description") %></li>
-      <li><strong><%= t("gocardless_items.panel.fields.agreement_id.label") %>:</strong> <%= t("gocardless_items.panel.fields.agreement_id.description") %></li>
-      <li><strong><%= t("gocardless_items.panel.fields.requisition_status.label") %>:</strong> <%= t("gocardless_items.panel.fields.requisition_status.description") %></li>
     </ul>
   </div>
 
@@ -50,31 +45,6 @@
                         label: t("gocardless_items.panel.fields.secret_key.label"),
                         placeholder: is_new_record ? t("gocardless_items.panel.fields.secret_key.placeholder_new") : t("gocardless_items.panel.fields.secret_key.placeholder_update"),
                         type: :password %>
-
-    <%= form.text_field :institution_id,
-                        label: t("gocardless_items.panel.fields.institution_id.label"),
-                        placeholder: is_new_record ? t("gocardless_items.panel.fields.institution_id.placeholder_new") : t("gocardless_items.panel.fields.institution_id.placeholder_update"),
-                        value: gocardless_item.institution_id %>
-
-    <%= form.text_field :institution_name,
-                        label: t("gocardless_items.panel.fields.institution_name.label"),
-                        placeholder: is_new_record ? t("gocardless_items.panel.fields.institution_name.placeholder_new") : t("gocardless_items.panel.fields.institution_name.placeholder_update"),
-                        value: gocardless_item.institution_name %>
-
-    <%= form.text_field :requisition_id,
-                        label: t("gocardless_items.panel.fields.requisition_id.label"),
-                        placeholder: is_new_record ? t("gocardless_items.panel.fields.requisition_id.placeholder_new") : t("gocardless_items.panel.fields.requisition_id.placeholder_update"),
-                        value: gocardless_item.requisition_id %>
-
-    <%= form.text_field :agreement_id,
-                        label: t("gocardless_items.panel.fields.agreement_id.label"),
-                        placeholder: is_new_record ? t("gocardless_items.panel.fields.agreement_id.placeholder_new") : t("gocardless_items.panel.fields.agreement_id.placeholder_update"),
-                        value: gocardless_item.agreement_id %>
-
-    <%= form.text_field :requisition_status,
-                        label: t("gocardless_items.panel.fields.requisition_status.label"),
-                        placeholder: is_new_record ? t("gocardless_items.panel.fields.requisition_status.placeholder_new") : t("gocardless_items.panel.fields.requisition_status.placeholder_update"),
-                        value: gocardless_item.requisition_status %>
 
     <div class="flex justify-end">
       <%= form.submit is_new_record ? t("gocardless_items.panel.save_button") : t("gocardless_items.panel.update_button"),

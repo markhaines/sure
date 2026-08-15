@@ -398,17 +398,16 @@ class GocardlessItemsController < ApplicationController
       @gocardless_item = Current.family.gocardless_items.find(params[:id])
     end
 
+    # Only the credentials are user-supplied. institution_id, institution_name,
+    # requisition_id, agreement_id and requisition_status are connection state written by
+    # the consent flow, so they are deliberately NOT permitted here: letting a form set
+    # them would allow pointing an item at an arbitrary requisition.
     def gocardless_item_params
       params.require(:gocardless_item).permit(
         :name,
         :sync_start_date,
         :secret_id,
-        :secret_key,
-        :institution_id,
-        :institution_name,
-        :requisition_id,
-        :agreement_id,
-        :requisition_status
+        :secret_key
       )
     end
 
