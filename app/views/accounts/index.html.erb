@@ -90,6 +90,10 @@
       <%= render @questrade_items.sort_by(&:created_at) %>
     <% end %>
 
+    <% if @gocardless_items.any? %>
+  <%= render @gocardless_items.sort_by(&:created_at) %>
+<% end %>
+
     <% if @manual_accounts.any? %>
       <div id="manual-accounts">
         <%= render "accounts/index/manual_accounts", accounts: @manual_accounts %>

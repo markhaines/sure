@@ -573,5 +573,12 @@ class AccountsController < ApplicationController
         latest_sync = item.latest_sync_record
         @wise_sync_stats_map[item.id] = latest_sync&.sync_stats || {}
       end
+
+# Gocardless sync stats
+@gocardless_sync_stats_map = {}
+@gocardless_items.each do |item|
+  latest_sync = item.syncs.ordered.first
+  @gocardless_sync_stats_map[item.id] = latest_sync&.sync_stats || {}
+end
     end
 end
