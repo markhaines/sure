@@ -450,7 +450,26 @@ class GocardlessItemsController < ApplicationController
       )
     end
 
+    # GoCardless reports PSD2 `cashAccountType`, which is an ISO 20022 code, not Sure's
+    # own vocabulary. Without this mapping every code falls through to the Depository
+    # default, so a credit card is created as a cash account and its balance counts
+    # towards assets instead of debt.
+    ISO20022_ACCOUNTABLE_TYPES = {
+      "card" => "CreditCard",   # card account
+      "loan" => "Loan",         # loan account
+      "odft" => "CreditCard",   # overdraft: a liability, closest fit is a credit line
+      "cacc" => "Depository",   # current
+      "svgs" => "Depository",   # savings
+      "slry" => "Depository",   # salary
+      "tran" => "Depository",   # transacting
+      "cash" => "Depository",   # cash payment
+      "sacc" => "Depository"    # settlement
+    }.freeze
+
     def infer_accountable_type(account_type, subtype = nil)
+      iso = ISO20022_ACCOUNTABLE_TYPES[account_type.to_s.downcase]
+      return iso if iso
+
       case account_type&.downcase
       when "depository"
         "Depository"
