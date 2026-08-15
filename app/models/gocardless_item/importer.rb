@@ -206,11 +206,22 @@ class GocardlessItem::Importer
       by_id.values
     end
 
+    # Identity of a transaction for snapshot de-duplication.
+    #
+    # The generated default looked for :id, :date, :amount and :description. GoCardless
+    # uses none of those names, so EVERY transaction produced the same key ("--") and the
+    # merge collapsed a whole statement into a single row: 170 transactions stored as 1.
+    # Mirrors GocardlessAccount::Transactions::Processor#external_id_for so the snapshot
+    # and the imported entries agree on what counts as the same transaction.
     def transaction_key(transaction)
-      transaction = transaction.with_indifferent_access if transaction.is_a?(Hash)
-      # Use ID if available, otherwise generate key from date/amount/description
-      transaction[:id] || transaction["id"] ||
-        [ transaction[:date], transaction[:amount], transaction[:description] ].join("-")
+      t = transaction.is_a?(Hash) ? transaction.with_indifferent_access : transaction
+
+      t[:transactionId].presence || t[:internalTransactionId].presence ||
+        [
+          t[:bookingDate] || t[:valueDate],
+          t.dig(:transactionAmount, :amount),
+          t[:remittanceInformationUnstructured]
+        ].join("|")
     end
 
     def prune_removed_accounts(upstream_account_ids)
