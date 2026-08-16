@@ -440,6 +440,12 @@ class GocardlessItemsController < ApplicationController
       # Set subtype if the accountable supports it
       if config[:subtype].present? && accountable_class.respond_to?(:subtypes)
         accountable_attrs[:subtype] = config[:subtype]
+      elsif accountable_class == CreditCard
+        # ISO 20022 CARD positively identifies a credit card, so the default subtype is
+        # safe to apply. Depository is deliberately left WITHOUT one: its default is
+        # "checking", but CACC only says "cash account", so assuming checking would
+        # relabel a plain current account away from the generic "Cash" category.
+        accountable_attrs[:subtype] = CreditCard::DEFAULT_SUBTYPE
       end
 
       Current.family.accounts.create!(
