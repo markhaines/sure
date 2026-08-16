@@ -97,8 +97,11 @@ class GocardlessItemsController < ApplicationController
       requisition_status: requisition[:status]
     )
 
-    # allow_other_host: this deliberately leaves the app for the bank's own consent page.
-    redirect_to requisition[:link], allow_other_host: true
+    safe_redirect_to_gocardless(
+      requisition[:link],
+      fallback_path: new_gocardless_item_path,
+      fallback_alert: t(".invalid_redirect", default: "The bank connection returned an unexpected address, so it was not followed.")
+    )
   rescue Provider::Gocardless::GocardlessError => e
     Rails.logger.error "GocardlessItemsController#connect - #{e.message}"
     redirect_to select_bank_gocardless_item_path(@gocardless_item), alert: e.message, status: :see_other
@@ -400,6 +403,36 @@ class GocardlessItemsController < ApplicationController
         secret_id: credentials_source.secret_id,
         secret_key: credentials_source.secret_key
       )
+    end
+
+    # The consent link comes back from the GoCardless API, so it is not user input, but it
+    # is still an off-site redirect built from a remote response. Validating the host means
+    # a tampered or unexpected payload cannot bounce the user anywhere it likes. Mirrors
+    # safe_redirect_to_enable_banking.
+    TRUSTED_GOCARDLESS_HOSTS = %w[gocardless.com bankaccountdata.gocardless.com].freeze
+
+    def safe_redirect_to_gocardless(url, fallback_path:, fallback_alert:)
+      if valid_gocardless_redirect_url?(url)
+        redirect_to url, allow_other_host: true
+      else
+        Rails.logger.warn("GoCardless redirect blocked - invalid URL: #{url.inspect}")
+        redirect_to fallback_path, alert: fallback_alert
+      end
+    end
+
+    def valid_gocardless_redirect_url?(url)
+      return false if url.blank?
+
+      uri = URI.parse(url)
+      return false unless uri.scheme == "https"
+      return false if uri.host.blank?
+
+      TRUSTED_GOCARDLESS_HOSTS.any? do |host|
+        uri.host == host || uri.host.end_with?(".#{host}")
+      end
+    rescue URI::InvalidURIError => e
+      Rails.logger.warn("GoCardless invalid redirect URL: #{url.inspect} - #{e.message}")
+      false
     end
 
     def set_gocardless_item
