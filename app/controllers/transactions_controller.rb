@@ -82,6 +82,17 @@ class TransactionsController < ApplicationController
     @breadcrumbs = [ [ t("breadcrumbs.home"), root_path ], [ t("breadcrumbs.transactions"), nil ] ]
   end
 
+  # Persists which optional details the transaction list shows.
+  #
+  # Unchecking every box is a legitimate choice, so an absent key means "none" rather
+  # than "unchanged": HTML omits unchecked checkboxes entirely, and treating that as
+  # no-op would make the last column impossible to turn off.
+  def columns
+    Current.user.update_transaction_columns(params[:columns] || [])
+
+    redirect_back fallback_location: transactions_path
+  end
+
   def clear_filter
     updated_params = {
       "q" => search_params,

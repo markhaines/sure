@@ -172,6 +172,15 @@ en:
       edit_merchants: Edit merchants
       edit_tags: Edit tags
       import: Import
+    column_settings:
+      columns: Columns
+      show_in_list: Show in list
+      column_names:
+        account: Account
+        category: Category
+        merchant: Merchant
+        notes: Notes
+        tags: Tags
     index:
       title: "Transactions"
       transaction: transaction

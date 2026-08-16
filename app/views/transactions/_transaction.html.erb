@@ -170,23 +170,51 @@
                       <% end %>
                     </span>
                   <% else %>
-                    <% if transaction.merchant&.present? %>
+                    <% if transaction.merchant&.present? && Current.user&.show_transaction_column?("merchant") %>
                       <span class="hidden lg:inline truncate"><%= transaction.merchant.name %> • </span>
                     <% end %>
-                    <span class="text-secondary hidden lg:inline">
-                      <%= link_to entry.account.name,
-                          account_path(entry.account, tab: "transactions"),
-                          data: { turbo_frame: "_top" },
-                          class: "hover:underline" %>
-                    </span>
+                    <% if Current.user&.show_transaction_column?("account") %>
+                      <span class="text-secondary hidden lg:inline">
+                        <%= link_to entry.account.name,
+                            account_path(entry.account, tab: "transactions"),
+                            data: { turbo_frame: "_top" },
+                            class: "hover:underline" %>
+                      </span>
+                    <% end %>
                     <div class="flex min-w-0 items-center gap-1">
                       <%= render "categories/category_name_mobile", transaction: transaction %>
-                      <% if transaction.merchant&.present? %>
+                      <% if transaction.merchant&.present? && Current.user&.show_transaction_column?("merchant") %>
                         <span class="lg:hidden min-w-0 truncate">• <%= transaction.merchant.name %></span>
                       <% end %>
                     </div>
                   <% end %>
                 </div>
+
+                <%# Optional detail rows. Rendered under the transaction name rather than
+                    as grid columns: the row is a fixed 12-column grid and notes are
+                    free text, so a real column would either truncate to uselessness or
+                    break the layout on narrow screens. %>
+                <% if Current.user&.show_transaction_column?("tags") && transaction.tags.any? %>
+                  <div class="flex items-center gap-1 flex-wrap mt-0.5">
+                    <% transaction.tags.each do |tag| %>
+                      <%= render DS::Pill.new(
+                            label: tag.name,
+                            custom_color: tag.color,
+                            size: :sm,
+                            marker: false,
+                            truncate: true
+                          ) %>
+                    <% end %>
+                  </div>
+                <% end %>
+
+                <% if Current.user&.show_transaction_column?("notes") && entry.notes.present? %>
+                  <div class="text-secondary text-xs font-normal truncate mt-0.5"
+                       title="<%= entry.notes %>">
+                    <%= icon "sticky-note", size: "xs", class: "inline-block text-subdued align-text-bottom" %>
+                    <%= entry.notes.to_s.squish %>
+                  </div>
+                <% end %>
               </div>
             </div>
           <% end %>

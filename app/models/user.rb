@@ -358,6 +358,39 @@ class User < ApplicationRecord
     end
   end
 
+  # Transaction list column preferences
+  #
+  # The list is a fixed 12-column grid, so these are the optional pieces of information
+  # shown alongside each transaction rather than true table columns. Merchant, account
+  # and category were previously hard-coded on; they are defaults now so existing users
+  # see no change.
+  TRANSACTION_COLUMNS = %w[merchant account category tags notes].freeze
+  DEFAULT_TRANSACTION_COLUMNS = %w[merchant account category].freeze
+
+  def transaction_columns
+    stored = preferences&.[]("transaction_columns")
+    return DEFAULT_TRANSACTION_COLUMNS if stored.nil?
+
+    # Intersect rather than trust: a column removed from the app in a later version
+    # would otherwise linger in a user's stored preferences forever.
+    Array(stored) & TRANSACTION_COLUMNS
+  end
+
+  def show_transaction_column?(key)
+    transaction_columns.include?(key.to_s)
+  end
+
+  def update_transaction_columns(columns)
+    selected = Array(columns).map(&:to_s) & TRANSACTION_COLUMNS
+
+    transaction do
+      lock!
+      updated = (preferences || {}).deep_dup
+      updated["transaction_columns"] = selected
+      update!(preferences: updated)
+    end
+  end
+
   # Reports preferences management
   def reports_section_collapsed?(section_key)
     preferences&.dig("reports_collapsed_sections", section_key) == true
