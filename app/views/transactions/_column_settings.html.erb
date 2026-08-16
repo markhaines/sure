@@ -1,0 +1,35 @@
+<%# Column visibility control for the transaction list.
+
+    A native <details> disclosure rather than a JS dropdown, per the Hotwire-first
+    convention. The form auto-submits on change so there is no separate save step.
+
+    A hidden empty field precedes the checkboxes so that unchecking everything still
+    submits the key: without it HTML omits unchecked boxes entirely and the last visible
+    column could never be turned off. %>
+
+<details class="relative group">
+  <summary class="flex items-center gap-1.5 cursor-pointer list-none rounded-lg border border-primary bg-container px-3 py-2 text-sm text-primary hover:bg-surface-hover">
+    <%= icon "columns-3", size: "sm" %>
+    <span class="hidden lg:inline"><%= t(".columns") %></span>
+  </summary>
+
+  <div class="absolute right-0 z-10 mt-1 w-56 rounded-lg border border-primary bg-container p-1 shadow-lg">
+    <%= form_with url: columns_transactions_path, method: :patch, data: { controller: "auto-submit-form" } do |f| %>
+      <%= hidden_field_tag "columns[]", "" %>
+
+      <p class="px-2 py-1.5 text-xs font-medium text-secondary uppercase"><%= t(".show_in_list") %></p>
+
+      <% User::TRANSACTION_COLUMNS.each do |column| %>
+        <label class="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-primary hover:bg-surface-hover cursor-pointer">
+          <%= check_box_tag "columns[]",
+                            column,
+                            Current.user.show_transaction_column?(column),
+                            id: "transaction_column_#{column}",
+                            class: "rounded border-primary text-primary focus:ring-0",
+                            data: { auto_submit_form_target: "auto" } %>
+          <span><%= t(".column_names.#{column}") %></span>
+        </label>
+      <% end %>
+    <% end %>
+  </div>
+</details>
